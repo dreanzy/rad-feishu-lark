@@ -1,10 +1,18 @@
 {
-  "name": "pi-feishu-extension",
+  "name": "pi-feishu-lark",
   "version": "0.1.0",
-  "description": "Feishu/Lark bridge for Pi as an extension package",
+  "description": "Feishu/Lark bridge for Pi coding agent — chat with Pi from Feishu or Lark",
   "type": "module",
   "license": "MIT",
   "keywords": ["pi-package", "pi", "feishu", "lark", "extension"],
+  "homepage": "https://github.com/AX1202/pi-feishu-lark#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AX1202/pi-feishu-lark.git"
+  },
+  "bugs": {
+    "url": "https://github.com/AX1202/pi-feishu-lark/issues"
+  },
   "dependencies": {
     "@larksuiteoapi/node-sdk": "^1.60.0",
     "qrcode-terminal": "^0.12.0"
