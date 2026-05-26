@@ -3,8 +3,11 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { parseModelActionValue } from "./cards.js";
-import { CHILD_SESSION_ENV, CONFIG_PATH, DAEMON_LOG_PATH, DEBUG_LOG_PATH, DEDUPE_PATH, ensureRoot, loadConfig, mask, removePath, STATE_PATH, writeJson } from "./config.js";
+import { BRIDGE_PATH, CHILD_SESSION_ENV, CONFIG_PATH, DAEMON_LOG_PATH, DEBUG_LOG_PATH, DEDUPE_PATH, ensureRoot, loadConfig, mask, removePath, STATE_PATH, writeJson } from "./config.js";
+import { FeishuBridgeRuntime } from "./bridge-runtime.js";
+import { FeishuBridgeStore } from "./bridge-store.js";
 import { ConversationManager } from "./conversation-manager.js";
+import { FeishuDelivery } from "./delivery.js";
 import { acquireGatewayLock, gatewayLockPath, readGatewayOwner, type GatewayLockHandle, type GatewayOwner } from "./gateway-lock.js";
 import { FeishuMessageHandler } from "./message-handler.js";
 import { runSetup, uiConfirm } from "./setup.js";
@@ -18,8 +21,11 @@ export default function feishuExtension(pi: ExtensionAPI) {
 
   let transport: FeishuTransport | undefined;
   let gatewayLock: GatewayLockHandle | undefined;
-  const conversations = new ConversationManager(process.cwd());
-  const messageHandler = new FeishuMessageHandler(conversations, () => transport);
+  const bridgeStore = new FeishuBridgeStore();
+  const delivery = new FeishuDelivery(() => transport);
+  const bridge = new FeishuBridgeRuntime(bridgeStore, delivery);
+  const conversations = new ConversationManager(process.cwd(), bridge);
+  const messageHandler = new FeishuMessageHandler(conversations, () => transport, bridgeStore);
 
   const STATUS_KEY = "feishu-connection";
   let uiRef: { setStatus?: (key: string, text: string | undefined) => void } | undefined;
@@ -41,6 +47,10 @@ export default function feishuExtension(pi: ExtensionAPI) {
     lastStatusText = undefined;
     uiRef?.setStatus?.(STATUS_KEY, undefined);
   }
+
+  pi.on("message_end", async (event, ctx) => {
+    bridge.handleMessageEnd(ctx.sessionManager.getSessionId(), undefined, event.message);
+  });
 
   async function start(config?: FeishuConfig, options: { takeover?: boolean } = {}) {
     if (transport?.isRunning()) {
@@ -253,6 +263,7 @@ export default function feishuExtension(pi: ExtensionAPI) {
           removePath(STATE_PATH);
           removePath(DEDUPE_PATH);
           removePath(`${DEDUPE_PATH}.lock`);
+          removePath(BRIDGE_PATH);
           conversations.resetMemory();
           messageHandler.reset();
           ensureRoot();

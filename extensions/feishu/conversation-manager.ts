@@ -9,6 +9,7 @@ import {
   ModelRegistry,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
+import type { FeishuBridgeRuntime } from "./bridge-runtime.js";
 import { CHILD_SESSION_ENV, ensureRoot, readJson, STATE_PATH, writeJson } from "./config.js";
 import { debugLog } from "./debug.js";
 import type { FeishuState } from "./types.js";
@@ -22,7 +23,10 @@ export class ConversationManager {
   private defaultModelId: string | undefined;
   private state: FeishuState;
 
-  constructor(private readonly cwd: string) {
+  constructor(
+    private readonly cwd: string,
+    private readonly bridge?: FeishuBridgeRuntime,
+  ) {
     ensureRoot();
     this.state = readJson<FeishuState>(STATE_PATH, { sessions: {} });
     this.state.sessions ||= {};
@@ -57,11 +61,16 @@ export class ConversationManager {
     const next = previous.then(async () => {
       debugLog("feishu.prompt.start", { key, textLength: userText.length, imageCount: images.length });
       const session = await this.getSession(key);
-      await withTimeout(
-        session.prompt(userText, images.length ? { images } : undefined),
-        180_000,
-        "Pi 模型处理超时，请稍后重试；如果是图片消息，可以先切换到明确支持图片的模型。",
-      );
+      this.bridge?.beginFeishuInput(session.sessionId);
+      try {
+        await withTimeout(
+          session.prompt(userText, images.length ? { images } : undefined),
+          180_000,
+          "Pi 模型处理超时，请稍后重试；如果是图片消息，可以先切换到明确支持图片的模型。",
+        );
+      } finally {
+        this.bridge?.endFeishuInput(session.sessionId);
+      }
       const answer = extractLastAssistantText(session);
       debugLog("feishu.prompt.done", { key, answerLength: answer.length });
       await onReply(answer || "No response.");
@@ -210,6 +219,12 @@ export class ConversationManager {
     });
 
     await session.bindExtensions({});
+    this.bridge?.attachSession(key, session.sessionId);
+    session.subscribe((event) => {
+      if (event.type === "message_end") {
+        this.bridge?.handleMessageEnd(session.sessionId, key, event.message);
+      }
+    });
 
     if (session.sessionFile && this.state.sessions[key] !== session.sessionFile) {
       this.state.sessions[key] = session.sessionFile;

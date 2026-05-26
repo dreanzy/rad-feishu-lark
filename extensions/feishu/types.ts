@@ -21,6 +21,29 @@ export type FeishuState = {
   models?: Record<string, ModelSelection>;
 };
 
+export type FeishuRoute = {
+  sessionKey: string;
+  sessionId?: string;
+  chatId: string;
+  chatType: "p2p" | "group";
+  threadMessageId?: string;
+  lastMessageId: string;
+  updatedAt: number;
+};
+
+export type FeishuJobRoute = FeishuRoute & {
+  jobId: string;
+  jobName?: string;
+  createdAt: number;
+};
+
+export type FeishuBridgeState = {
+  version: 1;
+  routes: Record<string, FeishuRoute>;
+  jobs: Record<string, FeishuJobRoute>;
+  sent: Record<string, number>;
+};
+
 export type FeishuMessage = {
   messageId: string;
   chatId: string;

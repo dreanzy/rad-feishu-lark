@@ -170,6 +170,21 @@ export class FeishuTransport {
     }
   }
 
+  async sendText(chatId: string, text: string) {
+    debugLog("feishu.send.text", { chatId, length: text.length });
+    const chunks = splitText(text, 3500);
+    for (const chunk of chunks) {
+      await this.sdkClient.im.message.create({
+        params: { receive_id_type: "chat_id" },
+        data: {
+          receive_id: chatId,
+          msg_type: "text",
+          content: JSON.stringify({ text: chunk }),
+        },
+      });
+    }
+  }
+
   async replyCard(messageId: string, card: object) {
     debugLog("feishu.reply.card", { messageId });
     await this.sdkClient.im.message.reply({

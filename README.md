@@ -90,6 +90,7 @@ Send these to the bot in Feishu/Lark / 在飞书/Lark 中发送给机器人:
 - **Image attachments** — PNG, JPEG, WebP (sent to Pi if model supports images) / 图片附件，支持 PNG/JPEG/WebP（模型支持图片时发送给 Pi）
 - **Text/code file attachments** — common source files, logs, JSON, CSV, Markdown, etc. / 文本/代码文件附件
 - **Per-conversation model selection** — via `/model` interactive card / 每个对话独立选择模型
+- **Pi result bridge** — key results from Pi jobs created through Feishu are sent back to the originating chat/topic / 从飞书创建的 Pi 任务，关键结果回传到最初会话/话题
 - **Single gateway ownership** — only one local Pi process connects to Feishu/Lark at a time / 单实例 gateway，避免多个本地 Pi 进程同时抢消息
 - **Message deduplication** — 30s window / 30 秒消息去重
 - **Debug log** — at `~/.pi/agent/feishu/debug.log` / 调试日志
@@ -120,6 +121,7 @@ Config is saved to `~/.pi/agent/feishu/config.json`. Can also use environment va
 |------|-------------|
 | `~/.pi/agent/feishu/config.json` | Bot credentials and settings / 机器人凭证与设置 |
 | `~/.pi/agent/feishu/state.json` | Conversation-to-session mappings / 会话映射 |
+| `~/.pi/agent/feishu/bridge.json` | Feishu routing for Pi-internal jobs / Pi 内部任务到飞书来源的路由 |
 | `~/.pi/agent/feishu/debug.log` | Debug event log / 调试事件日志 |
 | `~/.pi/agent/locks.json` | Gateway ownership lock / gateway owner 锁 |
 | `~/.pi/agent/sessions/` | Pi session files (one per Feishu conversation) / Pi 会话文件（每个飞书对话一个） |

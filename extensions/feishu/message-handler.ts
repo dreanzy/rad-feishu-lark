@@ -4,6 +4,7 @@ import type { ConversationManager } from "./conversation-manager.js";
 import { claimFeishuMessage, markFeishuMessage } from "./dedupe-store.js";
 import { debugLog } from "./debug.js";
 import { conversationKey, normalizeForDedupe, parseBotCommand, parseMessageInput, pruneRecentMap } from "./messages.js";
+import type { FeishuBridgeStore } from "./bridge-store.js";
 import type { FeishuTransport } from "./transport.js";
 import type { FeishuMessage } from "./types.js";
 
@@ -16,6 +17,7 @@ export class FeishuMessageHandler {
   constructor(
     private readonly conversations: ConversationManager,
     private readonly getTransport: () => FeishuTransport | undefined,
+    private readonly bridgeStore?: FeishuBridgeStore,
   ) {}
 
   reset() {
@@ -36,6 +38,7 @@ export class FeishuMessageHandler {
       const parsed = parseMessageInput(msg, transport.getBotOpenId());
       const text = parsed.text || "";
       const key = conversationKey(msg);
+      this.bridgeStore?.bindConversation(key, msg);
       debugLog("feishu.handler.parsed", {
         messageId: msg.messageId,
         key,
@@ -249,9 +252,10 @@ function buildPrompt(
   }
 
   const promptBody = contentParts.join("\n\n").trim();
+  const timeLine = `[Current local time: ${new Date().toString()}]`;
   return msg.chatType === "group"
-    ? `[Feishu group/topic: ${key}]\n${promptBody}`
-    : `[Feishu private chat]\n${promptBody}`;
+    ? `[Feishu group/topic: ${key}]\n${timeLine}\n${promptBody}`
+    : `[Feishu private chat]\n${timeLine}\n${promptBody}`;
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {
