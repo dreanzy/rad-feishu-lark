@@ -12,7 +12,7 @@ export class FeishuBridgeStore {
       sessionId: sessionId || previous?.sessionId,
       chatId: msg.chatId,
       chatType: msg.chatType,
-      threadMessageId: msg.rootId || msg.parentId || previous?.threadMessageId,
+      threadMessageId: routeThreadMessageId(msg, previous),
       lastMessageId: msg.messageId,
       updatedAt: Date.now(),
     };
@@ -77,4 +77,11 @@ export class FeishuBridgeStore {
   private write(state: FeishuBridgeState) {
     writeJson(BRIDGE_PATH, state);
   }
+}
+
+function routeThreadMessageId(msg: FeishuMessage, previous?: FeishuRoute) {
+  if (msg.rootId || msg.parentId) return msg.rootId || msg.parentId;
+  if (previous?.threadMessageId) return previous.threadMessageId;
+  if (msg.threadId || msg.chatMode === "topic") return msg.messageId;
+  return undefined;
 }

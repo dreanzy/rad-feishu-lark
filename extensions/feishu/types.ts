@@ -48,11 +48,13 @@ export type FeishuMessage = {
   messageId: string;
   chatId: string;
   chatType: "p2p" | "group";
+  chatMode?: "p2p" | "group" | "topic";
   senderOpenId: string;
   msgType: string;
   content: string;
   rootId?: string;
   parentId?: string;
+  threadId?: string;
   mentions?: unknown[];
 };
 

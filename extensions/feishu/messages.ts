@@ -12,9 +12,16 @@ export function pruneRecentMap(map: Map<string, number>, now: number, ttlMs: num
 
 export function conversationKey(msg: FeishuMessage) {
   if (msg.chatType === "p2p") return `p2p:${msg.senderOpenId}`;
-  const threadId = msg.rootId || msg.parentId;
+  const threadId = msg.threadId || msg.rootId || msg.parentId;
   if (threadId) return `group:${msg.chatId}:thread:${threadId}`;
+  if (msg.chatMode === "topic") return `group:${msg.chatId}:thread:${msg.messageId}`;
   return `group:${msg.chatId}`;
+}
+
+export function conversationLabel(msg: FeishuMessage) {
+  if (msg.chatType === "p2p") return "[飞书私聊]";
+  if (msg.rootId || msg.parentId || msg.threadId || msg.chatMode === "topic") return "[飞书话题]";
+  return "[飞书群聊]";
 }
 
 export function parseMessageInput(msg: FeishuMessage, botOpenId?: string): { text: string; attachments: FeishuAttachment[] } {

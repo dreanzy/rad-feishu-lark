@@ -3,7 +3,7 @@ import { buildModelCard } from "./cards.js";
 import type { ConversationManager } from "./conversation-manager.js";
 import { claimFeishuMessage, markFeishuMessage } from "./dedupe-store.js";
 import { debugLog } from "./debug.js";
-import { conversationKey, normalizeForDedupe, parseBotCommand, parseMessageInput, pruneRecentMap } from "./messages.js";
+import { conversationKey, conversationLabel, normalizeForDedupe, parseBotCommand, parseMessageInput, pruneRecentMap } from "./messages.js";
 import type { FeishuBridgeStore } from "./bridge-store.js";
 import type { FeishuTransport } from "./transport.js";
 import type { FeishuMessage } from "./types.js";
@@ -42,6 +42,8 @@ export class FeishuMessageHandler {
       debugLog("feishu.handler.parsed", {
         messageId: msg.messageId,
         key,
+        chatMode: msg.chatMode,
+        threadId: msg.threadId || msg.rootId || msg.parentId,
         textLength: text.length,
         attachments: parsed.attachments.map((item) => ({
           kind: item.kind,
@@ -94,7 +96,7 @@ export class FeishuMessageHandler {
         return;
       }
 
-      const prompt = buildPrompt(msg, key, text, fileSections, imageInputs, skippedImageCount, modelSupportsImage, downloadErrors);
+      const prompt = buildPrompt(msg, text, fileSections, imageInputs, skippedImageCount, modelSupportsImage, downloadErrors);
       await this.conversations.promptWithImages(key, prompt, imageInputs, async (reply) => {
         await transport.replyText(msg.messageId, reply);
       });
@@ -228,7 +230,6 @@ export class FeishuMessageHandler {
 
 function buildPrompt(
   msg: FeishuMessage,
-  key: string,
   text: string,
   fileSections: string[],
   imageInputs: FeishuImageInput[],
@@ -252,10 +253,7 @@ function buildPrompt(
   }
 
   const promptBody = contentParts.join("\n\n").trim();
-  const timeLine = `[Current local time: ${new Date().toString()}]`;
-  return msg.chatType === "group"
-    ? `[Feishu group/topic: ${key}]\n${timeLine}\n${promptBody}`
-    : `[Feishu private chat]\n${timeLine}\n${promptBody}`;
+  return `${conversationLabel(msg)} ${promptBody}`;
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {

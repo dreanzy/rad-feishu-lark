@@ -13,6 +13,7 @@ export class FeishuTransport {
   private wsClient: any;
   private running = false;
   private botOpenId: string | undefined;
+  private readonly chatModeCache = new Map<string, "p2p" | "group" | "topic">();
 
   constructor(
     private readonly config: FeishuConfig,
@@ -94,6 +95,7 @@ export class FeishuTransport {
       messageType: message.message_type,
       hasRootId: Boolean(message.root_id),
       hasParentId: Boolean(message.parent_id),
+      hasThreadId: Boolean(message.thread_id),
       content: message.content || "",
     });
 
@@ -104,15 +106,18 @@ export class FeishuTransport {
       }
     }
 
+    const chatMode = await this.getChatMode(message.chat_id, message.chat_type);
     const msg: FeishuMessage = {
       messageId: message.message_id,
       chatId: message.chat_id,
       chatType: message.chat_type,
+      chatMode,
       senderOpenId: sender?.sender_id?.open_id || "unknown",
       msgType: message.message_type,
       content: message.content || "",
       rootId: message.root_id,
       parentId: message.parent_id,
+      threadId: message.thread_id,
       mentions: message.mentions,
     };
 
@@ -148,6 +153,25 @@ export class FeishuTransport {
     const botOpenId = this.botOpenId;
     if (!botOpenId) return true;
     return mentions.some((m: any) => m?.id?.open_id === botOpenId || m?.id?.union_id === botOpenId);
+  }
+
+  private async getChatMode(chatId: string, chatType: "p2p" | "group"): Promise<"p2p" | "group" | "topic"> {
+    if (chatType === "p2p") return "p2p";
+    const cached = this.chatModeCache.get(chatId);
+    if (cached) return cached;
+    try {
+      const res = await this.sdkClient.im.v1.chat.get({ path: { chat_id: chatId } });
+      const mode = res?.data?.chat_mode === "topic" ? "topic" : "group";
+      this.chatModeCache.set(chatId, mode);
+      debugLog("feishu.chat.mode", { chatId, mode });
+      return mode;
+    } catch (error) {
+      debugLog("feishu.chat.mode_error", {
+        chatId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return "group";
+    }
   }
 
   private async addReaction(messageId: string, emojiType: string) {
