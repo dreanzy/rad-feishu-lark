@@ -193,6 +193,7 @@ Windows PATH 加入 C:\Program Files\Git\bin
 | 命令       | 作用                   |
 | -------- | -------------------- |
 | `/new`   | 为当前会话新建一个 Pi 会话      |
+| `/resume` | 打开历史会话列表，切回以前的 Pi 会话 |
 | `/model` | 打开模型选择卡片，切换当前会话使用的模型 |
 | `/stop`  | 停止当前这条回复的处理          |
 | `/workspace` | 查看当前会话绑定的工作区      |
@@ -234,6 +235,10 @@ Windows PATH 加入 C:\Program Files\Git\bin
 | `FEISHU_LANGUAGE`     | `zh` 或 `en`                   |
 | `FEISHU_REACT_EMOJI`  | 收到消息时的表情回应，默认 `THUMBSUP`      |
 | `FEISHU_AUTO_START`   | `1` 或 `0`                     |
+| `FEISHU_CARD_ACTION_MODE` | `webhook` 或 `ws`，默认 `webhook` |
+| `FEISHU_CARD_ACTION_WEBHOOK_HOST` | 卡片回调监听地址，默认 `0.0.0.0` |
+| `FEISHU_CARD_ACTION_WEBHOOK_PORT` | 卡片回调端口，默认 `3001` |
+| `FEISHU_CARD_ACTION_WEBHOOK_PATH` | 卡片回调路径，默认 `/webhook/card` |
 | `FEISHU_EXT_DEV`      | `1` 时显示本地开发标识 `DEV`           |
 
 ***
@@ -257,6 +262,9 @@ Windows PATH 加入 C:\Program Files\Git\bin
 - `/feishu reset` 只会清掉配置和映射，不会删除会话历史。
 - 从 TUI、CLI 或其他渠道创建的任务，不会主动发到飞书。
 - `/workspace` 当前只支持绝对路径，或 `~/` 开头的路径。
+- `/resume` 默认先显示当前项目的最近历史会话，也可以在卡片里切到“全部会话”并翻页浏览。
+- 卡片按钮现在优先走 webhook 回包模式；如果你还想临时沿用旧的 WS 更新方式，可以把 `FEISHU_CARD_ACTION_MODE` 设成 `ws`。
+- 卡片回调默认监听 `0.0.0.0:3001/webhook/card`，需要在飞书开发者后台把交互卡片回调地址指到一个外部可访问的 URL。
 
 ***
 
@@ -320,6 +328,7 @@ pi install npm:pi-feishu-lark
 | Command  | Meaning                                     |
 | -------- | ------------------------------------------- |
 | `/new`   | Start a new Pi session for the current chat |
+| `/resume` | Open past sessions and switch back to one |
 | `/model` | Open the model picker                       |
 | `/stop`  | Stop the current reply generation           |
 
@@ -334,9 +343,15 @@ pi install npm:pi-feishu-lark
 | `FEISHU_LANGUAGE`     | `zh` or `en`           |
 | `FEISHU_REACT_EMOJI`  | Reaction emoji         |
 | `FEISHU_AUTO_START`   | `1` or `0`             |
+| `FEISHU_CARD_ACTION_MODE` | `webhook` or `ws`, default `webhook` |
+| `FEISHU_CARD_ACTION_WEBHOOK_HOST` | Card callback listen host, default `0.0.0.0` |
+| `FEISHU_CARD_ACTION_WEBHOOK_PORT` | Card callback port, default `3001` |
+| `FEISHU_CARD_ACTION_WEBHOOK_PATH` | Card callback path, default `/webhook/card` |
 
 ### Notes
 
 - Image understanding depends on the selected model.
 - `/feishu reset` clears config and mappings, but keeps session history.
 - Tasks created from TUI, CLI, or other channels will not be pushed to Feishu automatically.
+- Card buttons now prefer webhook responses. If you want to keep the older WS patch flow temporarily, set `FEISHU_CARD_ACTION_MODE=ws`.
+- The card callback listens on `0.0.0.0:3001/webhook/card` by default, so Feishu must be pointed at a publicly reachable URL for interactive card buttons.

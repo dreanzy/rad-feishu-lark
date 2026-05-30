@@ -1,6 +1,7 @@
 import type { FeishuCardAction, FeishuConfig, FeishuMessage } from "./types.js";
 import { debugLog } from "./debug.js";
 import { buildMarkdownCardParts, buildPostMessages, chooseMessageMode } from "./rich-text.js";
+import { FeishuCardActionWebhook } from "./card-action-webhook.js";
 
 const TEXT_CHUNK_MAX_BYTES = 120 * 1024;
 
@@ -14,6 +15,7 @@ export class BotUnavailableError extends Error {
 export class FeishuTransport {
   private sdkClient: any;
   private wsClient: any;
+  private cardActionWebhook: FeishuCardActionWebhook | undefined;
   private running = false;
   private botOpenId: string | undefined;
   private readonly chatModeCache = new Map<string, "p2p" | "group" | "topic">();
@@ -44,10 +46,28 @@ export class FeishuTransport {
 
     const dispatcher = new lark.EventDispatcher({ loggerLevel: lark.LoggerLevel.error }).register({
       "im.message.receive_v1": async (data: unknown) => this.handleRawMessage(data),
-      "card.action.trigger": async (data: unknown) => this.handleCardAction(data),
       "im.message.reaction.created_v1": async () => undefined,
       "im.chat.member.bot.added_v1": async () => undefined,
     });
+
+    // Always register the WS card action handler. When the app is connected
+    // via WebSocket (which is always the case with WSClient), the Feishu
+    // platform delivers card action callbacks through the WS channel.
+    // Without this handler the EventDispatcher returns an invalid response
+    // to the platform, causing error 200672 on the client.
+    dispatcher.register({
+      "card.action.trigger": async (data: unknown) => this.handleCardAction(data),
+    });
+
+    // Optional webhook server as a backup delivery channel (only used when
+    // the developer console is explicitly configured for webhook delivery).
+    if (this.cardActionMode() === "webhook") {
+      this.cardActionWebhook = new FeishuCardActionWebhook(this.config, async (action) => this.handleCardActionAction(action, "webhook"));
+      await this.cardActionWebhook.start();
+      debugLog("feishu.card.webhook.endpoint", {
+        endpoint: this.cardActionWebhook.getEndpointLabel(),
+      });
+    }
 
     this.wsClient = new lark.WSClient({
       appId: this.config.appId,
@@ -57,12 +77,21 @@ export class FeishuTransport {
     });
 
     this.running = true;
-    this.wsClient.start({ eventDispatcher: dispatcher });
+    try {
+      this.wsClient.start({ eventDispatcher: dispatcher });
+    } catch (error) {
+      this.running = false;
+      try { await this.cardActionWebhook?.stop(); } catch {}
+      this.cardActionWebhook = undefined;
+      throw error;
+    }
   }
 
   async stop() {
     this.running = false;
     try { await this.wsClient?.stop?.(); } catch {}
+    try { await this.cardActionWebhook?.stop(); } catch {}
+    this.cardActionWebhook = undefined;
   }
 
   isRunning() {
@@ -140,24 +169,44 @@ export class FeishuTransport {
   }
 
   private async handleCardAction(data: any) {
-    const event = data?.event || data;
-    const messageId = event?.context?.open_message_id || event?.open_message_id;
-    const chatId = event?.context?.open_chat_id || event?.open_chat_id;
-    const operatorOpenId = event?.operator?.open_id;
-    if (!messageId || !chatId || !operatorOpenId) return;
+    // After EventDispatcher/RequestHandle.parse() the event fields are
+    // flattened to the top level. data.event is gone; use data directly.
+    const messageId = data?.context?.open_message_id || data?.open_message_id;
+    const chatId = data?.context?.open_chat_id || data?.open_chat_id;
+    const operatorOpenId = data?.operator?.open_id;
+    if (!messageId || !operatorOpenId) return;
     debugLog("feishu.card.action", {
       messageId,
       chatId,
-      hasToken: Boolean(event?.token),
-      value: event?.action?.value,
+      hasToken: Boolean(data?.token),
+      value: data?.action?.value,
     });
-    return this.onCardAction({
+    const result = await this.handleCardActionAction({
       messageId,
       chatId,
       operatorOpenId,
-      token: typeof event?.token === "string" ? event.token : undefined,
-      value: event?.action?.value,
-    });
+      token: typeof data?.token === "string" ? data.token : undefined,
+      value: data?.action?.value,
+    }, "ws");
+    // The WSClient sends the return value back to the Feishu platform as
+    // the card callback response. It must use the wrapped format:
+    //   { "card": { "type": "raw", "data": { ... card JSON ... } } }
+    if (result) {
+      return { card: { type: "raw", data: result } };
+    }
+    return result;
+  }
+
+  private async handleCardActionAction(action: FeishuCardAction, mode: "ws" | "webhook") {
+    const result = await this.onCardAction(action);
+    if (mode === "ws" && result) {
+      await this.updateCard(action.messageId, result);
+    }
+    return result;
+  }
+
+  private cardActionMode() {
+    return this.config.cardActionMode || "webhook";
   }
 
   private isMentioned(message: any): boolean {

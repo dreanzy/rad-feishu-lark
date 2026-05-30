@@ -1,11 +1,16 @@
 export type Domain = "feishu" | "lark";
 export type GroupPolicy = "open" | "mention";
+export type CardActionMode = "webhook" | "ws";
 
 export type FeishuConfig = {
   appId: string;
   appSecret: string;
   domain: Domain;
   groupPolicy: GroupPolicy;
+  cardActionMode?: CardActionMode;
+  cardActionWebhookHost?: string;
+  cardActionWebhookPort?: number;
+  cardActionWebhookPath?: string;
   language?: "zh" | "en";
   reactEmoji?: string;
   autoStart?: boolean;
@@ -67,7 +72,7 @@ export type FeishuAttachment = {
 
 export type FeishuCardAction = {
   messageId: string;
-  chatId: string;
+  chatId?: string;
   operatorOpenId: string;
   token?: string;
   value: unknown;

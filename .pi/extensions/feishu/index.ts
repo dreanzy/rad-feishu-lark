@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync } from 
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { parseModelActionValue } from "./cards.js";
+import { buildModelCard, buildResumeCard, parseModelActionValue, parseResumePageActionValue, parseResumeSelectActionValue } from "./cards.js";
 import { BRIDGE_PATH, CHILD_SESSION_ENV, CONFIG_PATH, DAEMON_LOG_PATH, DEBUG_LOG_PATH, DEDUPE_PATH, ensureRoot, loadConfig, mask, removePath, STATE_PATH, writeJson } from "./config.js";
 import { debugLog } from "./debug.js";
 import { FeishuBridgeRuntime } from "./bridge-runtime.js";
@@ -152,42 +152,48 @@ export default function feishuExtension(pi: ExtensionAPI) {
           cardMessageId: action.messageId,
           chatId: action.chatId,
         });
-        void conversations.stopConversation(stopTask.key, async () => undefined, stopTask.runId)
-          .then(async (result) => {
-            const status = result.status === "stopped"
-              ? "stopped"
-              : result.status === "failed"
-                ? "failed"
-                : "inactive";
-            await transport?.updateCard(action.messageId, buildTaskStatusCard({
-              key: stopTask.key,
-              runId: stopTask.runId,
-              status,
-              phase: result.message,
-            }));
-            debugLog("feishu.card.stop_final_update_done", {
-              key: stopTask.key,
-              runId: stopTask.runId,
-              cardMessageId: action.messageId,
-              result: result.status,
-            });
-          })
-          .catch((error) => {
-            debugLog("feishu.card.stop_final_update_error", {
-              key: stopTask.key,
-              runId: stopTask.runId,
-              cardMessageId: action.messageId,
-              error: error instanceof Error ? error.message : String(error),
-            });
-            console.error("[feishu] stop task failed:", error instanceof Error ? error.message : error);
-          });
-        return;
+        const result = await conversations.stopConversation(stopTask.key, async (reply) => {
+          await transport?.replyText(action.messageId, reply);
+        }, stopTask.runId);
+        const status = result.status === "stopped"
+          ? "stopped"
+          : result.status === "failed"
+            ? "failed"
+            : "inactive";
+        debugLog("feishu.card.stop_final_update_done", {
+          key: stopTask.key,
+          runId: stopTask.runId,
+          cardMessageId: action.messageId,
+          result: result.status,
+        });
+        return buildTaskStatusCard({
+          key: stopTask.key,
+          runId: stopTask.runId,
+          status,
+          phase: result.message,
+        });
+      }
+      const resumePage = parseResumePageActionValue(action.value);
+      if (resumePage) {
+        const page = await conversations.listResumeSessions(resumePage.key, resumePage.scope, resumePage.page);
+        return buildResumeCard(page);
+      }
+      const resumeSelect = parseResumeSelectActionValue(action.value);
+      if (resumeSelect) {
+        await conversations.resumeConversation(resumeSelect.key, resumeSelect.sessionPath, async (reply) => {
+          await transport?.replyText(action.messageId, reply);
+        });
+        const page = await conversations.listResumeSessions(resumeSelect.key, resumeSelect.scope, resumeSelect.page);
+        return buildResumeCard(page);
       }
       const selected = parseModelActionValue(action.value);
       if (!selected) return;
       await conversations.selectModel(selected.key, selected.provider, selected.modelId, async (reply) => {
         await transport?.replyText(action.messageId, reply);
       });
+      const models = conversations.getAvailableModels();
+      const currentModel = await conversations.getSelectedModel(selected.key);
+      return buildModelCard(selected.key, models, currentModel);
     });
     try {
       await transport.start();

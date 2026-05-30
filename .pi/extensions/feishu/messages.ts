@@ -2,6 +2,7 @@ import type { FeishuAttachment, FeishuMessage } from "./types.js";
 
 export type BotCommand =
   | { name: "new" }
+  | { name: "resume" }
   | { name: "model" }
   | { name: "stop" }
   | { name: "workspace"; path?: string };
@@ -82,6 +83,7 @@ export function parseBotCommand(text: string): BotCommand | undefined {
   const trimmed = text.trim();
   const normalized = trimmed.replace(/\s+/g, " ");
   if (normalized === "/new") return { name: "new" };
+  if (normalized === "/resume") return { name: "resume" };
   if (normalized === "/model") return { name: "model" };
   if (normalized === "/stop") return { name: "stop" };
   const workspaceMatch = trimmed.match(/^\/workspace(?:\s+(.+))?$/s);

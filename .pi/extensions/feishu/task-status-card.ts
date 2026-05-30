@@ -202,7 +202,10 @@ export class TaskStatusCard implements TaskStatusSink {
 export function buildTaskStatusCard(input: { key: string; status: TaskStatus; phase?: string; runId?: string }) {
   const running = input.status === "running";
   return {
-    config: { wide_screen_mode: true },
+    config: {
+      wide_screen_mode: true,
+      update_multi: true,
+    },
     header: {
       template: headerTemplate(input.status),
       title: { tag: "plain_text", content: titleForStatus(input.status) },

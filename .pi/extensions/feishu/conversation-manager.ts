@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import { basename, isAbsolute, join, resolve } from "node:path";
+import type { AgentSession, SessionInfo } from "@earendil-works/pi-coding-agent";
 import {
   AuthStorage,
   createAgentSession,
@@ -13,6 +13,7 @@ import {
 import type { FeishuBridgeRuntime } from "./bridge-runtime.js";
 import { CHILD_SESSION_ENV, ensureRoot, readJson, STATE_PATH, writeJson } from "./config.js";
 import { debugLog } from "./debug.js";
+import type { ResumeScope, ResumeSessionPage } from "./cards.js";
 import type { TaskStatusSink } from "./task-status-card.js";
 import type { FeishuState } from "./types.js";
 
@@ -28,6 +29,8 @@ export type StopConversationResult =
   | { status: "not_running"; message: string }
   | { status: "stale"; message: string }
   | { status: "failed"; message: string };
+
+const RESUME_PAGE_SIZE = 10;
 
 export class ConversationManager {
   private readonly sessions = new Map<string, Promise<AgentSession>>();
@@ -157,6 +160,82 @@ export class ConversationManager {
       delete this.state.sessions[key];
       writeJson(STATE_PATH, this.state);
       await onReply("已创建新会话。旧会话历史已保留，下一条消息会从新上下文开始。");
+    }).catch(async (error) => {
+      await onReply(`Pi error: ${error instanceof Error ? error.message : String(error)}`);
+    });
+    this.queues.set(key, next);
+    await next;
+  }
+
+  async listResumeSessions(key: string, scope: ResumeScope, page: number): Promise<ResumeSessionPage> {
+    const sessions = await this.getResumeSessions(key, scope);
+    const normalizedPage = Math.max(0, Math.floor(page));
+    const total = sessions.length;
+    const totalPages = Math.max(1, Math.ceil(total / RESUME_PAGE_SIZE));
+    const clampedPage = Math.min(normalizedPage, totalPages - 1);
+    const currentSessionPath = this.normalizeSessionPath(this.state.sessions[key]);
+    const start = clampedPage * RESUME_PAGE_SIZE;
+    const items = sessions.slice(start, start + RESUME_PAGE_SIZE).map((session) => {
+      const sessionPath = this.normalizeSessionPath(session.path) || session.path;
+      return {
+        path: session.path,
+        title: session.name?.trim() || summarizeFirstMessage(session.firstMessage),
+        subtitle: session.name?.trim()
+          ? summarizeFirstMessage(session.firstMessage)
+          : `消息数：${session.messageCount}`,
+        modifiedLabel: formatModifiedLabel(session.modified),
+        workspaceLabel: scope === "all" ? formatWorkspaceLabel(session.cwd) : undefined,
+        isCurrent: Boolean(currentSessionPath && sessionPath && currentSessionPath === sessionPath),
+      };
+    });
+
+    return {
+      key,
+      scope,
+      page: clampedPage,
+      total,
+      totalPages,
+      items,
+    };
+  }
+
+  async resumeConversation(key: string, sessionPathInput: string, onReply: (text: string) => Promise<void>) {
+    if (this.activeRuns.has(key)) {
+      await onReply("当前还有进行中的处理，请先发送 /stop，再切换历史会话。");
+      return;
+    }
+
+    const previous = this.previousTurn(key);
+    const next = previous.then(async () => {
+      const sessionPath = this.normalizeExistingSessionPath(sessionPathInput);
+      const sessionInfo = await this.findSessionInfo(sessionPath);
+      if (!sessionInfo) {
+        await onReply("这条历史会话不存在，可能已经被删除。请重新打开 /resume 选择。");
+        return;
+      }
+
+      const currentPath = this.normalizeSessionPath(this.state.sessions[key]);
+      if (currentPath === sessionPath) {
+        this.state.workspaces![key] = sessionInfo.cwd || this.getWorkspace(key);
+        writeJson(STATE_PATH, this.state);
+        await onReply(`你已经在这个历史会话里了。\n当前工作区：${this.state.workspaces![key]}`);
+        return;
+      }
+
+      const cached = this.sessions.get(key);
+      if (cached) {
+        try { (await cached).dispose(); } catch {}
+      }
+
+      this.sessions.delete(key);
+      this.state.sessions[key] = sessionPath;
+      this.state.workspaces![key] = sessionInfo.cwd || this.cwd;
+      writeJson(STATE_PATH, this.state);
+      await onReply([
+        `已切换到历史会话：${sessionInfo.name?.trim() || summarizeFirstMessage(sessionInfo.firstMessage)}`,
+        `工作区：${this.state.workspaces![key]}`,
+        "下一条消息会继续接着这个会话往下聊。",
+      ].join("\n"));
     }).catch(async (error) => {
       await onReply(`Pi error: ${error instanceof Error ? error.message : String(error)}`);
     });
@@ -333,6 +412,47 @@ export class ConversationManager {
     }
     return session;
   }
+
+  private async getResumeSessions(key: string, scope: ResumeScope) {
+    const base = scope === "all"
+      ? await SessionManager.listAll()
+      : await SessionManager.list(this.getWorkspace(key));
+    return [...base].sort((a, b) => toTimeMs(b.modified) - toTimeMs(a.modified));
+  }
+
+  private async findSessionInfo(sessionPath: string): Promise<SessionInfo | undefined> {
+    const currentWorkspace = this.getWorkspaceFromSessionFile(sessionPath);
+    const localSessions = currentWorkspace ? await SessionManager.list(currentWorkspace) : [];
+    const normalizedTarget = this.normalizeSessionPath(sessionPath);
+    const fromLocal = localSessions.find((item) => this.normalizeSessionPath(item.path) === normalizedTarget);
+    if (fromLocal) return fromLocal;
+    const allSessions = await SessionManager.listAll();
+    return allSessions.find((item) => this.normalizeSessionPath(item.path) === normalizedTarget);
+  }
+
+  private getWorkspaceFromSessionFile(sessionPath: string) {
+    try {
+      return SessionManager.open(sessionPath).getCwd();
+    } catch {
+      return undefined;
+    }
+  }
+
+  private normalizeExistingSessionPath(path: string) {
+    if (!path || !existsSync(path)) {
+      throw new Error("历史会话不存在，可能已经被删除。");
+    }
+    return realpathSync(path);
+  }
+
+  private normalizeSessionPath(path: string | undefined) {
+    if (!path) return undefined;
+    try {
+      return existsSync(path) ? realpathSync(path) : path;
+    } catch {
+      return path;
+    }
+  }
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {
@@ -399,4 +519,31 @@ function ensureWorkspaceExists(path: string) {
   if (!stat.isDirectory()) {
     throw new Error(`工作区不是目录：${path}`);
   }
+}
+
+function summarizeFirstMessage(text: string) {
+  const normalized = (text || "").replace(/\s+/g, " ").trim();
+  if (!normalized) return "未命名会话";
+  return normalized.length > 36 ? `${normalized.slice(0, 35)}...` : normalized;
+}
+
+function formatModifiedLabel(value: Date | string) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "未知";
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const hh = String(date.getHours()).padStart(2, "0");
+  const min = String(date.getMinutes()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
+}
+
+function formatWorkspaceLabel(cwd: string) {
+  if (!cwd) return "(unknown)";
+  return `${basename(cwd)} · ${cwd}`;
+}
+
+function toTimeMs(value: Date | string) {
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
 }

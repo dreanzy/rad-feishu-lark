@@ -1,5 +1,5 @@
 import { detectCodeLanguage, decodeTextFile, detectImageMime, type FeishuImageInput, isSupportedImageMime, isSupportedTextFile } from "./attachments.js";
-import { buildModelCard } from "./cards.js";
+import { buildModelCard, buildResumeCard } from "./cards.js";
 import type { ConversationManager } from "./conversation-manager.js";
 import { claimFeishuMessage, markFeishuMessage } from "./dedupe-store.js";
 import { debugLog } from "./debug.js";
@@ -134,6 +134,12 @@ export class FeishuMessageHandler {
       }
       const currentModel = await this.conversations.getSelectedModel(key);
       await transport.replyCard(msg.messageId, buildModelCard(key, models, currentModel));
+      return true;
+    }
+
+    if (command.name === "resume") {
+      const page = await this.conversations.listResumeSessions(key, "current", 0);
+      await transport.replyCard(msg.messageId, buildResumeCard(page));
       return true;
     }
 
